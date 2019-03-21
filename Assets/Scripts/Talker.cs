@@ -78,23 +78,28 @@ public class Talker : MonoBehaviour
 
     public void Login() {
         //Debug.Log("Login attempt satrted!");
-        StartCoroutine(LoginCoroutine(username.text, password.text));
+        if (ValidateCreds()) StartCoroutine(LoginCoroutine(username.text, password.text));
     }
 
     public void SignUp() {
-        StartCoroutine(SignUpCoroutine(username.text, password.text));
+        if (ValidateCreds()) StartCoroutine(SignUpCoroutine(username.text, password.text));
     }
+
+    bool ValidateCreds() {
+        return (!string.IsNullOrWhiteSpace(username.text)) && (!string.IsNullOrEmpty(password.text));
+    }
+
 
     public void updateChats() {
         StartCoroutine(GetChatList());
     }
 
     public void Invite(string name) {
-        StartCoroutine(InviteCoroutine(name));
+        if (!string.IsNullOrWhiteSpace(name)) StartCoroutine(InviteCoroutine(name));
     }
 
     public void CreateRoom(string name) {
-        StartCoroutine(CreateRoomCoroutine(name));
+        if (!string.IsNullOrWhiteSpace(name)) StartCoroutine(CreateRoomCoroutine(name));
     }
 
     IEnumerator CreateRoomCoroutine(string name) {
@@ -115,12 +120,17 @@ public class Talker : MonoBehaviour
 
     IEnumerator InviteCoroutine(string name) {
         WWWForm form = new WWWForm();
-        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "chat/invite/" + name, form)) {
+        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "chat"+currentRoom.ToString()+"/invite/" + name, form)) {
             if (PlayerPrefs.HasKey("Token"))
             {
                 request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
             }
             yield return request.SendWebRequest();
+
+            if (!request.isNetworkError)
+            {
+                Debug.Log(request.downloadHandler.text);
+            }
         }
     }
 
