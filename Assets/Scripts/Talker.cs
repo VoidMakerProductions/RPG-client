@@ -16,6 +16,13 @@ public class Talker : MonoBehaviour
     public GameObject ChatPanel;
     public RoomListItem[] roomList;
     public Dropdown ChatSelect;
+    public Text ChatText;
+    bool canManageRoom;
+    [SerializeField]
+    int currentRoom = 0;
+    int currentIndex;
+    float nextUpdate;
+    public InputField InviteField;
     // Start is called before the first frame update
     void Start()
     {
@@ -33,17 +40,41 @@ public class Talker : MonoBehaviour
 
             if (!request.isNetworkError) {
                 //Debug.Log(request.downloadHandler.text);
-                User = JsonUtility.FromJson<UserResponse>(request.downloadHandler.text);
+                if (!request.isHttpError)
+                {
+                    User = JsonUtility.FromJson<UserResponse>(request.downloadHandler.text);
+
+                    Greeting.text = User.is_authenticated ? "Greetings, " + User.username + " !" : "";
+
+                    LoginPanel.SetActive(!User.is_authenticated);
+                    ChatPanel.SetActive(User.is_authenticated);
+                    if (User.is_authenticated) {
+                        updateChats();
+                    }
+                }
+                else {
+                    LoginPanel.SetActive(true);
+                    ChatPanel.SetActive(false);
+                }
                 
-                Greeting.text =User.is_authenticated ? "Greetings, " + User.username+" !" : "";
-                
-                LoginPanel.SetActive(!User.is_authenticated);
-                ChatPanel.SetActive(User.is_authenticated);
             }
-            
+            else
+            {
+                LoginPanel.SetActive(true);
+                ChatPanel.SetActive(false);
+            }
+
         }
     }
 
+    public void SendChatMessage(string message) {
+        StartCoroutine(SendMessageCoroutine(message));
+    }
+    public void ChangeRoom(int index) {
+        currentRoom = roomList[index].room.id;
+        canManageRoom = roomList[index].room.owner == User.id;
+        currentIndex = index;
+    }
 
     public void Login() {
         //Debug.Log("Login attempt satrted!");
@@ -58,6 +89,65 @@ public class Talker : MonoBehaviour
         StartCoroutine(GetChatList());
     }
 
+    public void Invite(string name) {
+        StartCoroutine(InviteCoroutine(name));
+    }
+
+    public void CreateRoom(string name) {
+        StartCoroutine(CreateRoomCoroutine(name));
+    }
+
+    IEnumerator CreateRoomCoroutine(string name) {
+        WWWForm form = new WWWForm();
+        form.AddField("name", name);
+        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "chat/create", form))
+        {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+
+            StartCoroutine(GetChatList());
+        }
+
+    }
+
+    IEnumerator InviteCoroutine(string name) {
+        WWWForm form = new WWWForm();
+        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "chat/invite/" + name, form)) {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+        }
+    }
+
+    IEnumerator UpdateCurrentChat() {
+        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "chat/" + currentRoom.ToString())) {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+
+            if (!request.isNetworkError) {
+                //Debug.Log(request.downloadHandler.text);
+                if (!request.isHttpError) {
+                    ChatResponse response = JsonUtility.FromJson<ChatResponse>(request.downloadHandler.text);
+                    string msg = "";
+                    foreach (var item in response.data) {
+                        msg += item.when;
+                        msg += "\n";
+                        msg += "<b>" + item.author.username + "</b>: ";
+                        msg += item.text + "\n";
+                    }
+                    ChatText.text = msg;
+                }
+            }
+        }
+    }
 
     IEnumerator GetChatList() {
         using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "chat/list")) {
@@ -69,7 +159,7 @@ public class Talker : MonoBehaviour
 
             if (!request.isNetworkError)
             {
-                Debug.Log(request.downloadHandler.text);
+                //Debug.Log(request.downloadHandler.text);
                 if (!request.isHttpError)
                 {
                     
@@ -78,7 +168,23 @@ public class Talker : MonoBehaviour
                     foreach (var item in roomList) {
                         names.Add(item.room.name);
                     }
+                    ChatSelect.ClearOptions();
                     ChatSelect.AddOptions(names);
+                    if (names.Count > 0) {
+                        try
+                        {
+                            currentRoom = roomList[currentIndex].room.id;
+                            canManageRoom = roomList[currentIndex].room.owner == User.id;
+                            
+                        }
+                        catch (System.IndexOutOfRangeException)
+                        {
+                            currentRoom = roomList[0].room.id;
+                            canManageRoom = roomList[0].room.owner == User.id;
+                            currentIndex = 0;
+                        }
+                    }
+                    
                 }
 
             }
@@ -86,7 +192,37 @@ public class Talker : MonoBehaviour
 
     }
 
+    IEnumerator SendMessageCoroutine(string message) {
+        WWWForm form = new WWWForm();
+        form.AddField("text", message);
+        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "chat/" + currentRoom.ToString(), form)) {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
 
+            if (!request.isNetworkError)
+            {
+                //Debug.Log(request.downloadHandler.text);
+                if (!request.isHttpError)
+                {
+                    ChatResponse response = JsonUtility.FromJson<ChatResponse>(request.downloadHandler.text);
+                    string msg = "";
+                    foreach (var item in response.data)
+                    {
+                        msg += item.when;
+                        msg += "\n";
+                        msg += "<b>" + item.author.username + "</b>: ";
+                        msg += item.text + "\n";
+                    }
+                    ChatText.text = msg;
+                }
+            }
+
+        }
+
+    }
 
 
     IEnumerator SignUpCoroutine(string uname,string password) {
@@ -127,8 +263,26 @@ public class Talker : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        
+        InviteField.interactable = canManageRoom;
+        if (currentRoom > 0 && Time.time > nextUpdate) {
+            nextUpdate = Time.time + 0.2f;
+            StartCoroutine(UpdateCurrentChat());
+        }
     }
+}
+
+
+[System.Serializable]
+public class ChatResponse {
+    public ChatMsg[] data;
+}
+
+[System.Serializable]
+public class ChatMsg {
+    public string text;
+    public string when;
+    public UserResponse2 author;
+    public int id;
 }
 
 [System.Serializable]
@@ -144,6 +298,7 @@ public class RoomListItem {
 public class Room {
     public int id;
     public string name;
+    public int owner;
 }
 
 [System.Serializable]
@@ -153,8 +308,18 @@ public class LoginResponse {
     public string error;
 }
 
+
 [System.Serializable]
-public class UserResponse {
+public class UserResponse2
+{
+    public int id;
+    public string username;
+    public int max_games_played;
+    public int max_games_ruled;
+}
+[System.Serializable]
+public class UserResponse
+{
     public int id;
     public bool is_authenticated;
     public string username;
