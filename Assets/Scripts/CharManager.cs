@@ -2,17 +2,34 @@
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.UI;
 
 public class CharManager : MonoBehaviour
 {
     Character character;
 
-    public TextMeshProUGUI name_t,intel,will,attr,dex,str,end,sum;
-    public TMP_InputField name_if;
+    public TextMeshProUGUI name_t, intel, will, attr, dex, str, end, sum;
+    public TMP_InputField name_if, desc, img;
     public Button[] statchangers;
     public Button sndbutton;
+    public Image image;
+    public bool is_new;
+    public Sprite loading;
+    public string currentCharLocation {
+        get {
+            return character != null ? character.location : null;
+        }
+    }
 
+    public Character Character {
+        get {
+            return character;
+        }
+        set {
+            loadCharacter(value);
+        }
+    }
     public bool CanChangeStats { get {
             return statchangers[0].interactable;
         } set {
@@ -22,6 +39,15 @@ public class CharManager : MonoBehaviour
             name_if.interactable = value;
         } }
 
+
+    public void updateImg(string url) {
+        character.img = url;
+        image.sprite = Cache.instance.GetSprite(character.img, setImage);
+    }
+
+    public void setImage(Sprite sprite) {
+        image.sprite = sprite;
+    }
 
     public WWWForm formFromCharacter() {
         WWWForm form = new WWWForm();
@@ -39,13 +65,15 @@ public class CharManager : MonoBehaviour
         form.AddField("nat_cold_res", character.nat_cold_res);
         form.AddField("nat_elec_res", character.nat_elec_res);
         form.AddField("nat_acid_res", character.nat_acid_res);
-
+        form.AddField("desc",character.desc);
+        form.AddField("img", character.img);
         return form;
     }
 
 
     public void loadCharacter(Character character) {
         this.character = character;
+        is_new = false;
         Display();
     }
 
@@ -58,6 +86,10 @@ public class CharManager : MonoBehaviour
         str.text = character.str.ToString();
         end.text = character.end.ToString();
         sum.text = character.stat_sum.ToString();
+        desc.text = character.desc;
+        Sprite s = Cache.instance.GetSprite(character.img, setImage);
+        image.sprite = s ?? loading;
+        img.text = character.img;
     }
 
     public void changeName(string name) {
@@ -65,9 +97,14 @@ public class CharManager : MonoBehaviour
         character.name = name;
         Display();
     }
+    
+    public void changeDesc() {
+        character.desc = desc.text;
+    }
 
     public void newChar() {
         character = new Character();
+        is_new = true;
         CanChangeStats = true;
         Display();
     }

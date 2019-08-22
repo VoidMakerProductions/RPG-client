@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.Tilemaps;
 using UnityEngine.UI;
+using System.Net.Sockets;
 
 public class Talker : MonoBehaviour
 {
     public static string APIprefix = "http://172.22.10.10/";
-
     public UserResponse User;
     public InputField username;
     public InputField password;
@@ -17,26 +18,52 @@ public class Talker : MonoBehaviour
     public GameObject GamePanel;
     public PanelSwither swither;
     public CharManager charManager;
-    public RoomListItem[] roomList;
-    public Dropdown ChatSelect;
+    public ArtifactManager artifactManager;
+    public Location location;
     public TextMeshProUGUI ChatText;
     public TextMeshProUGUI ICChatText;
+    public Tilemap tilemap;
+    //public CustomTile tile;
+
     int selectedCharacter;
     public Character[] myChars;
+    public Character[] allChars;
     bool canManageRoom;
     [SerializeField]
-    int currentRoom = 0;
+
+    
+
     int currentCharIndex;
     float nextUpdate;
-    public InputField InviteField;
+    
     // Start is called before the first frame update
     void Start()
     {
-
+        
         StartCoroutine(GetAuth());
         
     }
 
+    
+
+    public void UpdateCharDesc() {
+        StartCoroutine(updateCharDesc());
+    }
+    IEnumerator updateCharDesc()
+    {
+        WWWForm form = charManager.formFromCharacter();
+        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "char/"+selectedCharacter+"/setdesc/", form))
+        {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+            if (!request.isNetworkError) {
+                Debug.Log(request.downloadHandler.text);
+            }
+        }
+    }
     IEnumerator sendNewChar()
     {
         WWWForm form = charManager.formFromCharacter();
@@ -58,7 +85,14 @@ public class Talker : MonoBehaviour
 
     public void SendNewChar() {
         charManager.CanChangeStats = false;
-        StartCoroutine(sendNewChar());
+        if (charManager.is_new)
+        {
+            StartCoroutine(sendNewChar());
+        }
+        else {
+            StartCoroutine(updateCharDesc());
+        }
+        
     }
 
     public void NextChar() {
@@ -68,6 +102,9 @@ public class Talker : MonoBehaviour
     public void PrevChar() {
         StartCoroutine(prevChar());
     }
+    public void SameChar() {
+        StartCoroutine(sameChar());
+    }
     IEnumerator nextChar() {
         yield return GetMyChars();
         charManager.CanChangeStats = false;
@@ -75,8 +112,10 @@ public class Talker : MonoBehaviour
         currentCharIndex = currentCharIndex >= myChars.Length ? 0 : currentCharIndex;
         try
         {
+            //Debug.Log(myChars[currentCharIndex]);
             charManager.loadCharacter(myChars[currentCharIndex]);
             selectedCharacter = myChars[currentCharIndex].id;
+            artifactManager.refreshEquip(myChars[currentCharIndex].equip);
         }
         catch (System.IndexOutOfRangeException)
         {
@@ -93,12 +132,47 @@ public class Talker : MonoBehaviour
         {
             charManager.loadCharacter(myChars[currentCharIndex]);
             selectedCharacter = myChars[currentCharIndex].id;
+            artifactManager.refreshEquip(myChars[currentCharIndex].equip);
         }
         catch (System.IndexOutOfRangeException)
         {
             charManager.newChar();
         }
     }
+    IEnumerator sameChar() {
+        yield return GetMyChars();
+        charManager.CanChangeStats = false;
+        try
+        {
+            charManager.loadCharacter(myChars[currentCharIndex]);
+            selectedCharacter = myChars[currentCharIndex].id;
+            artifactManager.refreshEquip(myChars[currentCharIndex].equip);
+        }
+        catch (System.IndexOutOfRangeException)
+        {
+            charManager.newChar();
+        }
+
+    }
+    public void SendArt() {
+        artifactManager.is_new = false;
+        StartCoroutine(sendArt());
+    }
+
+    IEnumerator sendArt() {
+        WWWForm form = artifactManager.formFromArt();
+        form.AddField("holder", selectedCharacter);
+        string suffix = artifactManager.is_new ? "new/" : "edit/";
+        using (UnityWebRequest request = UnityWebRequest.Post(APIprefix + "char/art/" + suffix , form)) {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+            yield return sameChar();
+        }
+    }
+
 
     IEnumerator GetAuth() {
         using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "auth_state")) {
@@ -188,10 +262,9 @@ public class Talker : MonoBehaviour
 
     }
 
-
-    IEnumerator UpdateICChat()
+    IEnumerator GetAllChars()
     {
-        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "ictalk/"))
+        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "char/all/"))
         {
             if (PlayerPrefs.HasKey("Token"))
             {
@@ -201,48 +274,16 @@ public class Talker : MonoBehaviour
 
             if (!request.isNetworkError)
             {
-                //Debug.Log(request.downloadHandler.text);
                 if (!request.isHttpError)
                 {
-                    ICChatResponse response = JsonUtility.FromJson<ICChatResponse>(request.downloadHandler.text);
-                    string msg = "";
-                    foreach (var item in response.data)
-                    {
-                        msg += item.timestamp;
-                        msg += "\n";
-                        msg += "<b>" + item.author.name + "</b>: ";
-                        msg += item.text + "\n";
-                    }
-                    ICChatText.text = msg;
+                    allChars = JsonUtility.FromJson<CharResponse>(request.downloadHandler.text).data;
                 }
             }
         }
 
     }
-    IEnumerator UpdateCurrentChat() {
-        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "chat/" )) {
-            if (PlayerPrefs.HasKey("Token"))
-            {
-                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
-            }
-            yield return request.SendWebRequest();
 
-            if (!request.isNetworkError) {
-                //Debug.Log(request.downloadHandler.text);
-                if (!request.isHttpError) {
-                    ChatResponse response = JsonUtility.FromJson<ChatResponse>(request.downloadHandler.text);
-                    string msg = "";
-                    foreach (var item in response.data) {
-                        msg += item.timestamp;
-                        msg += "\n";
-                        msg += "<b>" + item.author.username + "</b>: ";
-                        msg += item.text + "\n";
-                    }
-                    ChatText.text = msg;
-                }
-            }
-        }
-    }
+   
 
     IEnumerator SendMessageCoroutine(string message) {
         WWWForm form = new WWWForm();
@@ -371,6 +412,104 @@ public class Talker : MonoBehaviour
             
         }
     }
+    IEnumerator UpdateICChat()
+    {
+        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "ictalk/"))
+        {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+
+            if (!request.isNetworkError)
+            {
+                //Debug.Log(request.downloadHandler.text);
+                if (!request.isHttpError)
+                {
+                    ICChatResponse response = JsonUtility.FromJson<ICChatResponse>(request.downloadHandler.text);
+
+                    string msg = "";
+                    foreach (var item in response.data)
+                    {
+                        msg += item.timestamp;
+                        msg += "\n";
+                        msg += "<b>" + item.author.name + "</b>: ";
+                        msg += item.text + "\n";
+                    }
+                    ICChatText.text = msg;
+                }
+            }
+        }
+
+    }
+    IEnumerator UpdateCurrentChat()
+    {
+        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "chat/"))
+        {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+            yield return request.SendWebRequest();
+
+            if (!request.isNetworkError)
+            {
+                //Debug.Log(request.downloadHandler.text);
+                if (!request.isHttpError)
+                {
+                    ChatResponse response = JsonUtility.FromJson<ChatResponse>(request.downloadHandler.text);
+                    string msg = "";
+                    foreach (var item in response.data)
+                    {
+                        msg += item.timestamp;
+                        msg += "\n";
+                        msg += "<b>" + item.author.username + "</b>: ";
+                        msg += item.text + "\n";
+                    }
+                    ChatText.text = msg;
+                }
+            }
+        }
+    }
+
+
+    public void GetLocation() {
+        if (string.IsNullOrEmpty(charManager.currentCharLocation))
+            return;
+        StartCoroutine(getLocation(charManager.currentCharLocation));
+    }
+    IEnumerator getLocation(string loc) {
+        using (UnityWebRequest request = UnityWebRequest.Get(APIprefix + "loc/"+loc))
+        {
+            if (PlayerPrefs.HasKey("Token"))
+            {
+                request.SetRequestHeader("Authorization", "Token " + PlayerPrefs.GetString("Token"));
+            }
+
+            yield return request.SendWebRequest();
+
+            if (!request.isNetworkError && !request.isHttpError) {
+                location = JsonUtility.FromJson<Location>(request.downloadHandler.text);
+                DrawMap();
+            }
+        }
+       }
+    void DrawMap()
+    {
+        foreach (MyTile tile in location.tiles)
+        {
+            Vector3Int loc = new Vector3Int(tile.x, (tile.y + 1) * -1, 0);
+            CustomTile t = ScriptableObject.CreateInstance<CustomTile>();
+            t.type = tile.type;
+            tilemap.SetTile(loc, t);
+            Tile test = ScriptableObject.CreateInstance<Tile>();
+            
+            
+        }
+
+    }
+
 }
 
 
@@ -402,7 +541,23 @@ public class CharResponse {
     public Character[] data;
 }
 
+[System.Serializable]
+public class Location {
+    public string name;
+    public Character[] characters;
+    public MyTile[] tiles;
+}
 
+[System.Serializable]
+public class MyTile {
+    public int x, y;
+    public TileType type;
+}
+
+[System.Serializable]
+public class TileType {
+    public string code,img;
+}
 [System.Serializable]
 public class Character {
     public int id;
@@ -422,8 +577,12 @@ public class Character {
     public int nat_elec_res;
     public int nat_acid_res;
     public int ap;
+    public int init;
+    public string desc;
+    public string img;
     public Artifact[] equip;
-
+    public int x, y;
+    public string location;
     public int stat_sum {
         get {
             return intel + will + attr + dex + str + end;
@@ -434,7 +593,7 @@ public class Character {
     public int MaxHP { get {
             int res = 30 + end * 5;
             foreach (Artifact artifact in equip) {
-                res += artifact.hp;
+                if (artifact.approved) res += artifact.hp;
             }
             return res;
         } }
@@ -446,7 +605,7 @@ public class Character {
             int res = nat_blade_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.blade_res;
+                if (artifact.approved) res += artifact.blade_res;
             }
             return res;
         }
@@ -458,7 +617,7 @@ public class Character {
             int res = nat_pierce_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.pierce_res;
+                if (artifact.approved) res += artifact.pierce_res;
             }
             return res;
         }
@@ -470,7 +629,7 @@ public class Character {
             int res = nat_blunt_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.blunt_res;
+                if (artifact.approved) res += artifact.blunt_res;
             }
             return res;
         }
@@ -482,7 +641,7 @@ public class Character {
             int res = nat_fire_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.fire_res;
+                if (artifact.approved) res += artifact.fire_res;
             }
             return res;
         }
@@ -494,7 +653,7 @@ public class Character {
             int res = nat_cold_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.cold_res;
+                if (artifact.approved) res += artifact.cold_res;
             }
             return res;
         }
@@ -506,7 +665,7 @@ public class Character {
             int res = nat_acid_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.acid_res;
+                if (artifact.approved) res += artifact.acid_res;
             }
             return res;
         }
@@ -518,7 +677,7 @@ public class Character {
             int res = nat_elec_res;
             foreach (Artifact artifact in equip)
             {
-                res += artifact.elec_res;
+                if (artifact.approved) res += artifact.elec_res;
             }
             return res;
         }
@@ -528,6 +687,7 @@ public class Character {
 
 [System.Serializable]
 public class Artifact {
+    public int id;
     public int blade_res;
     public int pierce_res;
     public int blunt_res;
@@ -541,6 +701,76 @@ public class Artifact {
     public int base_dmg;
     public int ap_cost;
     public int base_prec;
+    public int range;
+    public string name;
+    public bool approved;
+    public string repr_all() {
+        string hps = "HP: " + hp + "\n" ;
+
+        string res = "<b>Защита:</b>\n";
+        res += "Режущий " + blade_res + "\n";
+        res += "Проникающий " + pierce_res + "\n";
+        res += "Дробящий " + blunt_res + "\n";
+        res += "Огненный " + fire_res + "\n";
+        res += "Холодный " + cold_res + "\n";
+        res += "Электрический " + elec_res + "\n";
+        res += "Кислотный " + acid_res + "\n";
+        string wep = "<b>Как оружие:</b> BD " + base_dmg + " " + dmg_type + " BP/R " + base_prec + "/" + range;
+        
+        string appr = approved ? "" : "(Не одобрено)";
+        return name + appr + "\n" + hps + res + wep;
+    }
+    public string repr() {
+        
+        string hps = hp!=0?"HP: "+hp+"\n":"";
+        bool has_any_res = false;
+        string res = "";
+        if (blade_res != 0)
+        {
+            has_any_res = true;
+            res += "Режущий " + blade_res +"\n";
+        }
+        if (pierce_res != 0)
+        {
+            has_any_res = true;
+            res += "Проникающий " + pierce_res + "\n";
+        }
+        if (blunt_res != 0)
+        {
+            has_any_res = true;
+            res += "Дробящий " + blunt_res + "\n";
+        }
+        if (fire_res != 0)
+        {
+            has_any_res = true;
+            res += "Огненный " + fire_res +"\n";
+        }
+        if (cold_res != 0)
+        {
+            has_any_res = true;
+            res += "Холодный " + cold_res +"\n";
+        }
+        if (elec_res != 0)
+        {
+            has_any_res = true;
+            res += "Электрический " + elec_res +"\n";
+        }
+        if (acid_res != 0)
+        {
+            has_any_res = true;
+            res += "Кислотный " + acid_res +"\n";
+        }
+
+        if (has_any_res) {
+            res = "<b>Защита:</b>\n"+res;
+        }
+        string wep = "";
+        if (weapon) {
+            wep = "<b>Как оружие:</b> BD " + base_dmg+" "+dmg_type+" BP/R "+base_prec+"/"+range;
+        }
+        string appr = approved ? "" : "(Не одобрено)";
+        return name+appr+"\n"+hps + res + wep;
+    }
 }
 
 [System.Serializable]
@@ -585,6 +815,7 @@ public class UserResponse2
 {
     public int id;
     public string username;
+    public bool is_master;
 }
 [System.Serializable]
 public class UserResponse
@@ -592,6 +823,7 @@ public class UserResponse
     public int id;
     public bool is_authenticated;
     public string username;
+    public bool is_master;
 }
 
 [System.Serializable]
